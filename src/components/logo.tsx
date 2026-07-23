@@ -28,7 +28,6 @@ export function Logo({ size = 32 }: { size?: number }) {
         style={{ fontSize: size * 0.5 }}
         aria-hidden
       >
-        A
       </span>
     </div>
   );

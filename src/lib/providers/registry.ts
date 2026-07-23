@@ -1,9 +1,10 @@
 /**
  * Central registry of all AI models AURELIA can talk to.
  * `id` is what gets stored in ModelAccess.modelId and Message.modelUsed.
+ * `label` is the user-facing name shown in the model selector.
  */
 
-export type ModelProvider = "gemini" | "openrouter" | "nvidia";
+export type ModelProvider = "gemini" | "deepseek" | "nvidia";
 
 export interface ModelDefinition {
   id: string;
@@ -17,27 +18,24 @@ export interface ModelDefinition {
 export const MODEL_REGISTRY: ModelDefinition[] = [
   {
     id: "gemini-2.5-flash-lite",
-    label: "Gemini 2.5 Flash Lite",
+    label: "Swift",
     provider: "gemini",
     apiModel: "gemini-2.5-flash-lite",
-    description: "Fast & efficient, good for everyday questions.",
+    description: "Fast and efficient. Good for short conversations and quick answers.",
   },
   {
-    id: "openrouter-free",
-    label: "OpenRouter (Free Models)",
-    provider: "openrouter",
-    // swap this for whichever free model you want to default to,
-    // e.g. "meta-llama/llama-3.3-70b-instruct:free"
-    apiModel: "meta-llama/llama-3.3-70b-instruct:free",
-    description: "Community free-tier model via OpenRouter.",
+    id: "deepseek-v4-flash",
+    label: "Apex",
+    provider: "deepseek",
+    apiModel: "deepseek-chat",
+    description: "Maximum intelligence. Good for complex reasoning and nuanced conversations.",
   },
   {
     id: "nvidia-nemotron",
-    label: "NVIDIA Nemotron 3 Ultra (550B-A55B)",
+    label: "Insight",
     provider: "nvidia",
     apiModel: "nvidia/nemotron-3-ultra-550b-a55b",
-    description:
-      "Open frontier reasoning MoE model, 550B total / 55B active params, via NVIDIA NIM (build.nvidia.com).",
+    description: "Balanced and capable. Good for a wide range of tasks.",
   },
 ];
 

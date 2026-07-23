@@ -15,9 +15,13 @@ const THINKING_STAGES = ["Reading", "Reasoning", "Writing"];
 export function ChatWindow({
   conversationId,
   onConversationCreated,
+  sidebarOpen,
+  onOpenSidebar,
 }: {
   conversationId: string | null;
   onConversationCreated: (id: string) => void;
+  sidebarOpen: boolean;
+  onOpenSidebar: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -53,8 +57,6 @@ export function ChatWindow({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Cycle through thinking-stage labels while a response streams in,
-  // so the wait reads as progress rather than a frozen spinner.
   useEffect(() => {
     if (!streaming) {
       setStage(0);
@@ -81,8 +83,12 @@ export function ChatWindow({
     return data.conversation.id;
   }
 
-  async function handleSend() {
+async function handleSend() {
     if (!input.trim() || streaming) return;
+    if (!modelId) {
+      setError("Model is still loading — try again in a second.");
+      return;
+    }
     setError(null);
 
     const convId = await ensureConversation();
@@ -97,11 +103,18 @@ export function ChatWindow({
     requestAnimationFrame(autoResize);
     setStreaming(true);
 
-    fetch(`/api/conversations/${convId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: userMessage.content }),
-    }).catch(() => {});
+    // Persist user message BEFORE calling /api/chat, so ordering is
+    // guaranteed and a failure here surfaces instead of failing silently.
+    try {
+      await fetch(`/api/conversations/${convId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: userMessage.content }),
+      });
+    } catch (err) {
+      console.error("Failed to persist user message:", err);
+      // Non-fatal — continue to get the AI response even if saving failed.
+    }
 
     const assistantId = `local-${Date.now()}-assistant`;
     setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
@@ -126,20 +139,17 @@ export function ChatWindow({
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
-      let firstChunk = true;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         acc += decoder.decode(value, { stream: true });
-        if (firstChunk) {
-          firstChunk = false;
-        }
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, content: acc } : m))
         );
       }
     } catch (err) {
+      console.error("Chat request failed:", err);
       setError(err instanceof Error ? err.message : "Something went wrong");
       setMessages((prev) => prev.filter((m) => m.id !== assistantId));
     } finally {
@@ -148,10 +158,23 @@ export function ChatWindow({
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-border px-6 py-3.5">
-        <ModelSelector value={modelId} onChange={setModelId} />
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+    <div className="flex h-full flex-1 flex-col bg-background">
+      {/* Header */}
+      <header className="flex items-center justify-between border-b border-border px-4 py-3.5">
+        <div className="flex items-center gap-2">
+          {!sidebarOpen && (
+            <button
+              onClick={onOpenSidebar}
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-raised hover:text-foreground"
+              aria-label="Open sidebar"
+              title="Open sidebar"
+            >
+              <SidebarIcon />
+            </button>
+          )}
+          <ModelSelector value={modelId} onChange={setModelId} />
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-raised">
           <input
             type="checkbox"
             checked={useWebSearch}
@@ -162,75 +185,89 @@ export function ChatWindow({
         </label>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        {messages.length === 0 && (
-          <div className="mx-auto flex h-full max-w-lg flex-col items-center justify-center text-center">
+      {/* Message area */}
+      <div className="flex-1 overflow-y-auto">
+        {messages.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <Logo size={52} />
             <h1 className="font-display mt-5 text-4xl italic text-foreground">
               AURELIA
             </h1>
-            <p className="mt-3 text-sm leading-relaxed text-muted">
+            <p className="mt-3 max-w-md text-base leading-relaxed text-muted">
               Adaptive Unified Reasoning Engine for Learning, Intelligence,
               and Assistance. Ask a question, or turn on web search for
               anything time-sensitive.
             </p>
           </div>
-        )}
+        ) : (
+          <div className="mx-auto max-w-4xl px-6 py-10">
+            <div className="space-y-8">
+              {messages.map((m, i) => {
+                const isLastAssistant =
+                  m.role === "assistant" && i === messages.length - 1;
+                const isEmptyStreaming =
+                  isLastAssistant && streaming && m.content.length === 0;
+                const isUser = m.role === "user";
 
-        <div className="mx-auto max-w-3xl space-y-7">
-          {messages.map((m, i) => {
-            const isLastAssistant =
-              m.role === "assistant" && i === messages.length - 1;
-            const isEmptyStreaming =
-              isLastAssistant && streaming && m.content.length === 0;
-
-            return (
-              <div key={m.id} className="flex gap-3.5">
-                {m.role === "assistant" ? (
-                  <div className="relative flex h-7 w-7 flex-shrink-0 items-center justify-center">
-                    {isLastAssistant && streaming && (
-                      <span className="breathe-ring absolute inset-0 rounded-full border border-foreground/40" />
+                return (
+                  <div
+                    key={m.id}
+                    className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}
+                  >
+                    {/* Avatar */}
+                    {isUser ? (
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-border-subtle bg-surface-raised text-sm font-medium text-muted">
+                        U
+                      </div>
+                    ) : (
+                      <div className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center">
+                        {isLastAssistant && streaming && (
+                          <span className="breathe-ring absolute inset-0 rounded-full border border-foreground/40" />
+                        )}
+                        <Logo size={36} />
+                      </div>
                     )}
-                    <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface-raised text-[11px] font-medium">
-                      <span className="font-display">A</span>
+
+                    {/* Bubble */}
+                    <div
+                      className={`max-w-[80%] rounded-2xl px-5 py-3.5 ${
+                        isUser
+                          ? "bg-foreground text-background"
+                          : "border border-border bg-surface text-foreground"
+                      }`}
+                    >
+                      {isEmptyStreaming ? (
+                        <span className="text-base text-muted-2">
+                          {THINKING_STAGES[stage]}
+                          <span className="caret">…</span>
+                        </span>
+                      ) : (
+                        <p className="whitespace-pre-wrap text-lg leading-relaxed">
+                          {m.content}
+                          {isLastAssistant && streaming && m.content.length > 0 && (
+                            <span className="caret text-muted-2">▍</span>
+                          )}
+                        </p>
+                      )}
                     </div>
                   </div>
-                ) : (
-                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-border-subtle bg-background text-[11px] font-medium text-muted">
-                    U
-                  </div>
-                )}
+                );
+              })}
+              <div ref={bottomRef} />
+            </div>
 
-                <div className="flex-1 pt-0.5">
-                  {isEmptyStreaming ? (
-                    <span className="text-sm text-muted-2">
-                      {THINKING_STAGES[stage]}
-                      <span className="caret">…</span>
-                    </span>
-                  ) : (
-                    <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">
-                      {m.content}
-                      {isLastAssistant && streaming && m.content.length > 0 && (
-                        <span className="caret text-muted-2">▍</span>
-                      )}
-                    </p>
-                  )}
-                </div>
+            {error && (
+              <div className="mt-4 rounded-lg border border-border-subtle bg-surface-raised px-4 py-2.5 text-sm text-muted">
+                {error}
               </div>
-            );
-          })}
-          <div ref={bottomRef} />
-        </div>
-
-        {error && (
-          <div className="mx-auto mt-4 max-w-3xl rounded-lg border border-border-subtle bg-surface-raised px-4 py-2.5 text-sm text-muted">
-            {error}
+            )}
           </div>
         )}
       </div>
 
-      <div className="border-t border-border bg-surface/60 p-4 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-border bg-surface px-2 py-2 focus-within:ring-2 focus-within:ring-ring">
+      {/* Input */}
+      <div className="border-t border-border p-4">
+        <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-2xl border border-border bg-surface px-2 py-2 focus-within:ring-2 focus-within:ring-ring">
           <textarea
             ref={textareaRef}
             value={input}
@@ -246,7 +283,7 @@ export function ChatWindow({
             }}
             rows={1}
             placeholder="Message AURELIA…"
-            className="max-h-48 flex-1 resize-none bg-transparent px-2 py-1.5 text-[15px] text-foreground outline-none placeholder:text-muted-2"
+            className="max-h-48 flex-1 resize-none bg-transparent px-2.5 py-2 text-base text-foreground outline-none placeholder:text-muted-2"
           />
           <button
             onClick={handleSend}
@@ -257,7 +294,7 @@ export function ChatWindow({
             <ArrowUp />
           </button>
         </div>
-        <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-muted-2">
+        <p className="mx-auto mt-2 max-w-4xl text-center text-xs text-muted-2">
           AURELIA can make mistakes. Verify important information.
         </p>
       </div>
@@ -275,6 +312,15 @@ function ArrowUp() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function SidebarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.3" />
+      <line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor" strokeWidth="1.3" />
     </svg>
   );
 }

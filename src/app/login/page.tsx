@@ -38,7 +38,7 @@ export default function LoginPage() {
       <div className="w-full max-w-[380px]">
         <div className="mb-10 flex flex-col items-center text-center">
           <Logo size={44} />
-          <h1 className="font-display mt-5 text-3xl italic text-foreground">
+          <h1 className="font-display mt-5 text-4xl italic text-foreground">
             AURELIA
           </h1>
           <p className="mt-2 text-xs uppercase tracking-widest text-muted-2">

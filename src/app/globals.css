@@ -131,6 +131,11 @@ main {
   background: var(--muted-2);
 }
 
+/* Bump base readable size across the app — previous scale felt cramped */
+html {
+  font-size: 17px;
+}
+
 /* Visible keyboard focus everywhere, disciplined not decorative */
 :focus-visible {
   outline: 2px solid var(--ring);
