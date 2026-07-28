@@ -20,6 +20,13 @@ export async function GET() {
   });
   const allowedIds = new Set(access.map((a: { modelId: string }) => a.modelId));
 
-  const models = MODEL_REGISTRY.filter((m) => allowedIds.has(m.id));
+  const realModels = MODEL_REGISTRY.filter(
+    (m) => m.provider !== "auto" && allowedIds.has(m.id)
+  );
+  const autoEntry = MODEL_REGISTRY.find((m) => m.provider === "auto");
+
+  // Only show "Auto" if the user has access to at least one real model.
+  const models = autoEntry && realModels.length > 0 ? [autoEntry, ...realModels] : realModels;
+
   return NextResponse.json({ models });
 }

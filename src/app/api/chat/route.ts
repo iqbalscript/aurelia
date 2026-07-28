@@ -8,6 +8,7 @@ import { streamNvidia } from "@/lib/providers/nvidia";
 import { webSearch } from "@/lib/search";
 import type { ChatMessage } from "@/lib/providers/types";
 import { AURELIA_SYSTEM_PROMPT } from "@/lib/system-prompt";
+import { pickAutoModel } from "@/lib/auto-router";
 
 export const runtime = "nodejs";
 
@@ -33,31 +34,51 @@ export async function POST(req: Request) {
     `[chat:${requestId}] modelId=${modelId} conversationId=${conversationId} messageCount=${messages?.length}`
   );
 
-  const model = getModelById(modelId);
+  let resolvedModelId = modelId;
+  if (modelId === "auto") {
+    resolvedModelId = pickAutoModel(messages);
+    console.log(`[chat:${requestId}] auto-routed "auto" -> "${resolvedModelId}"`);
+  }
+
+  const model = getModelById(resolvedModelId);
   if (!model) {
-    console.error(`[chat:${requestId}] REJECTED — unknown modelId: "${modelId}"`);
+    console.error(`[chat:${requestId}] REJECTED — unknown modelId: "${resolvedModelId}"`);
     return NextResponse.json({ error: "Unknown model" }, { status: 400 });
   }
 
   // --- RBAC check: does this user have access to this model? ---
   // ADMIN role bypasses the allowlist and can use everything.
   if (session.user.role !== "ADMIN") {
-    const access = await db.modelAccess.findUnique({
-      where: {
-        userId_modelId: {
-          userId: session.user.id,
-          modelId: model.id,
-        },
-      },
+    const userAccess = await db.modelAccess.findMany({
+      where: { userId: session.user.id },
+      select: { modelId: true },
     });
-    if (!access) {
-      console.error(
-        `[chat:${requestId}] REJECTED — user ${session.user.id} lacks access to ${model.id}`
-      );
-      return NextResponse.json(
-        { error: `You do not have access to ${model.label}` },
-        { status: 403 }
-      );
+    const allowedIds = new Set(userAccess.map((a: { modelId: string }) => a.modelId));
+
+    if (!allowedIds.has(model.id)) {
+      // If Auto picked a model this user can't use, fall back to any
+      // model they *do* have access to, instead of hard-failing.
+      if (modelId === "auto" && allowedIds.size > 0) {
+        const fallbackId = [...allowedIds][0];
+        const fallbackModel = getModelById(fallbackId);
+        if (fallbackModel) {
+          console.log(
+            `[chat:${requestId}] auto-picked model not allowed, falling back to "${fallbackId}"`
+          );
+          Object.assign(model, fallbackModel);
+        } else {
+          console.error(`[chat:${requestId}] REJECTED — fallback model invalid`);
+          return NextResponse.json({ error: "No accessible model found" }, { status: 403 });
+        }
+      } else {
+        console.error(
+          `[chat:${requestId}] REJECTED — user ${session.user.id} lacks access to ${model.id}`
+        );
+        return NextResponse.json(
+          { error: `You do not have access to ${model.label}` },
+          { status: 403 }
+        );
+      }
     }
   }
 

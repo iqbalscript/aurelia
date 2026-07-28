@@ -4,8 +4,7 @@
  * `label` is the user-facing name shown in the model selector.
  */
 
-export type ModelProvider = "gemini" | "deepseek" | "nvidia";
-
+export type ModelProvider = "auto" | "gemini" | "deepseek" | "nvidia";
 export interface ModelDefinition {
   id: string;
   label: string;
@@ -17,25 +16,32 @@ export interface ModelDefinition {
 
 export const MODEL_REGISTRY: ModelDefinition[] = [
   {
+    id: "auto",
+    label: "Auto",
+    provider: "auto",
+    apiModel: "auto",
+    description: "AURELIA picks the best model for your question automatically.",
+  },
+  {
     id: "gemini-2.5-flash-lite",
     label: "Swift",
     provider: "gemini",
     apiModel: "gemini-2.5-flash-lite",
-    description: "Fast and efficient. Good for short conversations and quick answers.",
+    description: "Gemini 2.5 Flash-Lite — fast everyday answers.",
   },
   {
     id: "deepseek-v4-flash",
     label: "Apex",
     provider: "deepseek",
     apiModel: "deepseek-chat",
-    description: "Maximum intelligence. Good for complex reasoning and nuanced conversations.",
+    description: "DeepSeek V4 Flash — strong general-purpose reasoning.",
   },
   {
     id: "nvidia-nemotron",
     label: "Insight",
     provider: "nvidia",
     apiModel: "nvidia/nemotron-3-ultra-550b-a55b",
-    description: "Balanced and capable. Good for a wide range of tasks.",
+    description: "NVIDIA Nemotron 3 Ultra — deep reasoning for hard problems.",
   },
 ];
 
