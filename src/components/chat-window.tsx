@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ModelSelector } from "./model-selector";
 import { Logo } from "./logo";
+import { PastedFileChip, type PastedFile } from "./pasted-file-chip";
+import { PastePreviewModal } from "./paste-preview-modal";
 
 interface Message {
   id: string;
@@ -11,6 +13,11 @@ interface Message {
 }
 
 const THINKING_STAGES = ["Reading", "Reasoning", "Writing"];
+
+// Paste longer than this becomes an attached .md file instead of
+// dumping raw text into the textarea — mirrors Claude/ChatGPT behavior.
+const PASTE_TO_FILE_THRESHOLD = 600;
+
 
 export function ChatWindow({
   conversationId,
@@ -30,6 +37,8 @@ export function ChatWindow({
   const [streaming, setStreaming] = useState(false);
   const [stage, setStage] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [pastedFiles, setPastedFiles] = useState<PastedFile[]>([]);
+  const [previewFile, setPreviewFile] = useState<PastedFile | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -83,23 +92,60 @@ export function ChatWindow({
     return data.conversation.id;
   }
 
-async function handleSend() {
-    if (!input.trim() || streaming) return;
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const text = e.clipboardData.getData("text");
+    if (text.length <= PASTE_TO_FILE_THRESHOLD) return; // let it paste normally
+
+    e.preventDefault();
+
+    const firstLine = text.trim().split("\n")[0]?.slice(0, 40) ?? "pasted text";
+    const file: PastedFile = {
+      // This handler only runs in response to a paste event.
+      // eslint-disable-next-line react-hooks/purity
+      id: `paste-${Date.now()}`,
+      filename: `${sanitizeFilename(firstLine) || "pasted-text"}.md`,
+      content: text,
+      charCount: text.length,
+    };
+    setPastedFiles((prev) => [...prev, file]);
+  }
+
+  function sanitizeFilename(s: string) {
+    return s
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .slice(0, 40);
+  }
+
+  async function handleSend() {
+    const hasText = input.trim().length > 0;
+    const hasFiles = pastedFiles.length > 0;
+    if ((!hasText && !hasFiles) || streaming) return;
     if (!modelId) {
       setError("Model is still loading — try again in a second.");
       return;
     }
     setError(null);
 
+    // Fold any attached pasted files into the message content as
+    // fenced markdown blocks, labeled by filename.
+    const filesBlock = pastedFiles
+      .map((f) => `**Attached: ${f.filename}**\n\n\`\`\`\n${f.content}\n\`\`\``)
+      .join("\n\n");
+    const combinedContent = [input.trim(), filesBlock].filter(Boolean).join("\n\n");
+
     const convId = await ensureConversation();
     const userMessage: Message = {
       id: `local-${Date.now()}`,
       role: "user",
-      content: input,
+      content: combinedContent,
     };
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
     setInput("");
+    setPastedFiles([]);
     requestAnimationFrame(autoResize);
     setStreaming(true);
 
@@ -267,7 +313,22 @@ async function handleSend() {
 
       {/* Input */}
       <div className="border-t border-border p-4">
-        <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-2xl border border-border bg-surface px-2 py-2 focus-within:ring-2 focus-within:ring-ring">
+        <div className="mx-auto max-w-4xl">
+          {pastedFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {pastedFiles.map((f) => (
+                <PastedFileChip
+                  key={f.id}
+                  file={f}
+                  onPreview={() => setPreviewFile(f)}
+                  onRemove={() =>
+                    setPastedFiles((prev) => prev.filter((x) => x.id !== f.id))
+                  }
+                />
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2 rounded-2xl border border-border bg-surface px-2 py-2 focus-within:ring-2 focus-within:ring-ring">
           <textarea
             ref={textareaRef}
             value={input}
@@ -281,23 +342,29 @@ async function handleSend() {
                 handleSend();
               }
             }}
+            onPaste={handlePaste}
             rows={1}
             placeholder="Message AURELIA…"
             className="max-h-48 flex-1 resize-none bg-transparent px-2.5 py-2 text-base text-foreground outline-none placeholder:text-muted-2"
           />
           <button
-            onClick={handleSend}
-            disabled={streaming || !input.trim()}
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-30"
-            aria-label="Send message"
-          >
-            <ArrowUp />
-          </button>
+              onClick={handleSend}
+              disabled={streaming || (!input.trim() && pastedFiles.length === 0)}
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-30"
+              aria-label="Send message"
+            >
+              <ArrowUp />
+            </button>
+          </div>
         </div>
         <p className="mx-auto mt-2 max-w-4xl text-center text-xs text-muted-2">
           AURELIA can make mistakes. Verify important information.
         </p>
       </div>
+
+      {previewFile && (
+        <PastePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      )}
     </div>
   );
 }
