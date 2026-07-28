@@ -5,6 +5,8 @@ import { ModelSelector } from "./model-selector";
 import { Logo } from "./logo";
 import { PastedFileChip, type PastedFile } from "./pasted-file-chip";
 import { PastePreviewModal } from "./paste-preview-modal";
+import { MessageContent } from "./message-content";
+import { CanvasPanel, type CanvasItem } from "./canvas-panel";
 
 interface Message {
   id: string;
@@ -41,10 +43,11 @@ export function ChatWindow({
   const [previewFile, setPreviewFile] = useState<PastedFile | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [canvasItem, setCanvasItem] = useState<CanvasItem | null>(null);
 
   useEffect(() => {
     if (!conversationId) {
-      setMessages([]);
+      queueMicrotask(() => setMessages([]));
       return;
     }
     fetch(`/api/conversations/${conversationId}`)
@@ -68,7 +71,7 @@ export function ChatWindow({
 
   useEffect(() => {
     if (!streaming) {
-      setStage(0);
+      queueMicrotask(() => setStage(0));
       return;
     }
     const id = setInterval(() => {
@@ -204,7 +207,8 @@ export function ChatWindow({
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col bg-background">
+    <div className="flex h-full flex-1 overflow-hidden bg-background">
+            <div className="flex h-full flex-1 flex-col overflow-hidden">
       {/* Header */}
       <header className="flex items-center justify-between border-b border-border px-4 py-3.5">
         <div className="flex items-center gap-2">
@@ -287,13 +291,17 @@ export function ChatWindow({
                           {THINKING_STAGES[stage]}
                           <span className="caret">…</span>
                         </span>
-                      ) : (
+                      ) : isUser ? (
                         <p className="whitespace-pre-wrap text-lg leading-relaxed">
                           {m.content}
+                        </p>
+                      ) : (
+                        <>
+                          <MessageContent content={m.content} onOpenCanvas={setCanvasItem} />
                           {isLastAssistant && streaming && m.content.length > 0 && (
                             <span className="caret text-muted-2">▍</span>
                           )}
-                        </p>
+                        </>
                       )}
                     </div>
                   </div>
@@ -363,7 +371,12 @@ export function ChatWindow({
       </div>
 
       {previewFile && (
-        <PastePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+          <PastePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+        )}
+      </div>
+
+      {canvasItem && (
+        <CanvasPanel item={canvasItem} onClose={() => setCanvasItem(null)} />
       )}
     </div>
   );

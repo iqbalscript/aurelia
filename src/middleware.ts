@@ -3,7 +3,7 @@ import { authConfig } from "@/lib/auth.config";
 
 const { auth } = NextAuth(authConfig);
 
-export default auth((req) => {
+export default auth(() => {
   return; // logic redirect sudah dipindah ke callback `authorized`
 });
 

@@ -34,7 +34,7 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
-    refresh();
+    void Promise.resolve().then(refresh);
   }, []);
 
   async function toggleModel(user: AdminUser, modelId: string) {

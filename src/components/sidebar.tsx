@@ -39,7 +39,7 @@ export function Sidebar({
   }
 
   useEffect(() => {
-    refresh();
+    void Promise.resolve().then(refresh);
   }, []);
 
   async function handleNewChat() {
