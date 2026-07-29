@@ -7,6 +7,8 @@ import { PastedFileChip, type PastedFile } from "./pasted-file-chip";
 import { PastePreviewModal } from "./paste-preview-modal";
 import { MessageContent } from "./message-content";
 import { CanvasPanel, type CanvasItem } from "./canvas-panel";
+import { AttachmentChip } from "./attachment-chip";
+import type { Attachment } from "@/lib/attachments";
 
 interface Message {
   id: string;
@@ -44,6 +46,9 @@ export function ChatWindow({
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [canvasItem, setCanvasItem] = useState<CanvasItem | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!conversationId) {
@@ -113,6 +118,41 @@ export function ChatWindow({
     setPastedFiles((prev) => [...prev, file]);
   }
 
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // allow re-selecting the same file later
+    if (files.length === 0) return;
+
+    setUploading(true);
+    for (const file of files) {
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/extract-file", { method: "POST", body: formData });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error ?? `Failed to process ${file.name}`);
+          continue;
+        }
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            filename: data.filename,
+            mimeType: data.mimeType,
+            base64: data.base64,
+            extractedText: data.extractedText,
+            sizeBytes: data.sizeBytes,
+          },
+        ]);
+      } catch (err) {
+        console.error("Upload failed:", err);
+        setError(`Failed to upload ${file.name}`);
+      }
+    }
+    setUploading(false);
+  }
+
   function sanitizeFilename(s: string) {
     return s
       .toLowerCase()
@@ -124,8 +164,9 @@ export function ChatWindow({
 
   async function handleSend() {
     const hasText = input.trim().length > 0;
-    const hasFiles = pastedFiles.length > 0;
-    if ((!hasText && !hasFiles) || streaming) return;
+    const hasPastedFiles = pastedFiles.length > 0;
+    const hasAttachments = attachments.length > 0;
+    if ((!hasText && !hasPastedFiles && !hasAttachments) || streaming) return;
     if (!modelId) {
       setError("Model is still loading — try again in a second.");
       return;
@@ -134,10 +175,17 @@ export function ChatWindow({
 
     // Fold any attached pasted files into the message content as
     // fenced markdown blocks, labeled by filename.
-    const filesBlock = pastedFiles
+    const pastedBlock = pastedFiles
       .map((f) => `**Attached: ${f.filename}**\n\n\`\`\`\n${f.content}\n\`\`\``)
       .join("\n\n");
-    const combinedContent = [input.trim(), filesBlock].filter(Boolean).join("\n\n");
+    const docAttachments = attachments.filter((a) => a.extractedText);
+    const docBlock = docAttachments
+      .map((a) => `**Attached: ${a.filename}**\n\n\`\`\`\n${a.extractedText}\n\`\`\``)
+      .join("\n\n");
+    const combinedContent = [input.trim(), pastedBlock, docBlock]
+      .filter(Boolean)
+      .join("\n\n");
+    const imageAttachments = attachments.filter((a) => a.mimeType.startsWith("image/"));
 
     const convId = await ensureConversation();
     const userMessage: Message = {
@@ -146,9 +194,14 @@ export function ChatWindow({
       content: combinedContent,
     };
     const nextMessages = [...messages, userMessage];
+    const imagesForApi = imageAttachments.map((a) => ({
+      base64: a.base64!,
+      mimeType: a.mimeType,
+    }));
     setMessages(nextMessages);
     setInput("");
     setPastedFiles([]);
+    setAttachments([]);
     requestAnimationFrame(autoResize);
     setStreaming(true);
 
@@ -176,7 +229,13 @@ export function ChatWindow({
           conversationId: convId,
           modelId,
           useWebSearch,
-          messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
+          messages: nextMessages.map((m, idx) => ({
+            role: m.role,
+            content: m.content,
+            ...(idx === nextMessages.length - 1 && imagesForApi.length > 0
+              ? { images: imagesForApi }
+              : {}),
+          })),
         }),
       });
 
@@ -322,7 +381,7 @@ export function ChatWindow({
       {/* Input */}
       <div className="border-t border-border p-4">
         <div className="mx-auto max-w-4xl">
-          {pastedFiles.length > 0 && (
+          {(pastedFiles.length > 0 || attachments.length > 0) && (
             <div className="mb-2 flex flex-wrap gap-2">
               {pastedFiles.map((f) => (
                 <PastedFileChip
@@ -334,9 +393,35 @@ export function ChatWindow({
                   }
                 />
               ))}
+              {attachments.map((a) => (
+                <AttachmentChip
+                  key={a.id}
+                  attachment={a}
+                  onRemove={() =>
+                    setAttachments((prev) => prev.filter((x) => x.id !== a.id))
+                  }
+                />
+              ))}
             </div>
           )}
           <div className="flex items-end gap-2 rounded-2xl border border-border bg-surface px-2 py-2 focus-within:ring-2 focus-within:ring-ring">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleFileSelect}
+              accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.txt,.md,.csv,.json"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-raised hover:text-foreground disabled:opacity-40"
+              aria-label="Attach file"
+              title="Attach file"
+            >
+              {uploading ? <Spinner /> : <PaperclipIcon />}
+            </button>
           <textarea
             ref={textareaRef}
             value={input}
@@ -357,7 +442,10 @@ export function ChatWindow({
           />
           <button
               onClick={handleSend}
-              disabled={streaming || (!input.trim() && pastedFiles.length === 0)}
+              disabled={
+                streaming ||
+                (!input.trim() && pastedFiles.length === 0 && attachments.length === 0)
+              }
               className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-30"
               aria-label="Send message"
             >
@@ -379,6 +467,43 @@ export function ChatWindow({
         <CanvasPanel item={canvasItem} onClose={() => setCanvasItem(null)} />
       )}
     </div>
+  );
+}
+
+function PaperclipIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+      <path
+        d="M11.5 5.5 6.914 10.086a2 2 0 1 0 2.829 2.828l5.121-5.12a3.5 3.5 0 1 0-4.95-4.95L4.793 7.965a5 5 0 1 0 7.071 7.071"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" className="animate-spin">
+      <circle
+        cx="8"
+        cy="8"
+        r="6"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeOpacity="0.25"
+        fill="none"
+      />
+      <path
+        d="M14 8a6 6 0 0 0-6-6"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        fill="none"
+      />
+    </svg>
   );
 }
 

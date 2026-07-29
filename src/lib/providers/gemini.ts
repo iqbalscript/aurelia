@@ -14,17 +14,21 @@ export async function streamGemini(
   const systemMsg = messages.find((m) => m.role === "system");
   const rest = messages.filter((m) => m.role !== "system");
 
-  const contents = rest.map((m, i) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [
-      {
-        text:
-          i === 0 && systemMsg
-            ? `${systemMsg.content}\n\n${m.content}`
-            : m.content,
-      },
-    ],
-  }));
+  const contents = rest.map((m, i) => {
+    const textPart = {
+      text:
+        i === 0 && systemMsg
+          ? `${systemMsg.content}\n\n${m.content}`
+          : m.content,
+    };
+    const imageParts = (m.images ?? []).map((img) => ({
+      inline_data: { mime_type: img.mimeType, data: img.base64 },
+    }));
+    return {
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [textPart, ...imageParts],
+    };
+  });
 
   const res = await fetch(
     `${GEMINI_BASE}/models/${apiModel}:streamGenerateContent?alt=sse&key=${apiKey}`,

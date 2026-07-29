@@ -109,6 +109,20 @@ if (useWebSearch && lastUserMsg) {
     }
   }
 
+  // Non-vision models can't see images — strip them but note it so the
+  // model (and the user, via the reply) knows an image was attached.
+  if (model.provider !== "gemini") {
+    const hasImages = finalMessages.some((m) => (m.images?.length ?? 0) > 0);
+    if (hasImages) {
+      finalMessages = finalMessages.map((m) => ({ role: m.role, content: m.content }));
+      finalMessages.unshift({
+        role: "system",
+        content:
+          "Note: the user attached one or more images, but this model cannot see images. Let them know you can't view the image and suggest switching to Swift (Gemini) if they need image analysis.",
+      });
+    }
+  }
+
   // --- Dispatch to the correct provider ---
   let stream: ReadableStream<Uint8Array>;
   try {

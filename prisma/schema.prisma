@@ -48,10 +48,11 @@ model Conversation {
 model Message {
   id             String       @id @default(cuid())
   conversationId String
-  role           String // "user" | "assistant" | "system"
+  role           String
   content        String
   modelUsed      String?
   usedWebSearch  Boolean      @default(false)
+  attachments    String?      // JSON array of {filename, mimeType, dataUrl?} — see src/lib/attachments.ts
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 }
