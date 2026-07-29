@@ -221,10 +221,27 @@ export function ChatWindow({
     const assistantId = `local-${Date.now()}-assistant`;
     setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
 
+    // Overall hard timeout for the whole request (covers a provider that
+    // never responds at all).
+    const controller = new AbortController();
+    const hardTimeout = setTimeout(() => controller.abort(), 90_000);
+
+    // "Stall" timeout: reset every time a new chunk arrives. If no chunk
+    // shows up for this long mid-stream, we treat the connection as dead
+    // and abort rather than hanging forever.
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    function resetStallTimer() {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => controller.abort(), 25_000);
+    }
+
     try {
+      resetStallTimer();
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           conversationId: convId,
           modelId,
@@ -251,16 +268,38 @@ export function ChatWindow({
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        resetStallTimer();
         acc += decoder.decode(value, { stream: true });
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, content: acc } : m))
         );
       }
+
+      // Stream ended with literally nothing written — surface it instead
+      // of leaving a permanently empty bubble.
+      if (acc.length === 0) {
+        throw new Error("The model didn't return a response. Please try again.");
+      }
     } catch (err) {
       console.error("Chat request failed:", err);
-      setError(err instanceof Error ? err.message : "Something went wrong");
-      setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+      const isAbort = err instanceof DOMException && err.name === "AbortError";
+      setError(
+        isAbort
+          ? "The response stalled and was stopped. Please try again."
+          : err instanceof Error
+          ? err.message
+          : "Something went wrong"
+      );
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId && m.content.length === 0
+            ? { ...m, content: "" } // keep partial content if any was streamed; drop only if empty
+            : m
+        ).filter((m) => !(m.id === assistantId && m.content.length === 0))
+      );
     } finally {
+      clearTimeout(hardTimeout);
+      if (stallTimer) clearTimeout(stallTimer);
       setStreaming(false);
     }
   }

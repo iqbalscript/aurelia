@@ -2,7 +2,7 @@
 
 **A**daptive **U**nified **R**easoning **E**ngine for **L**earning, **I**ntelligence, and **A**ssistance.
 
-AURELIA is a private, multi-provider AI chat application built with Next.js. It provides authenticated chat, per-user model access, persistent conversation history, server-streamed responses, optional live-web grounding, and a built-in admin console for user administration.
+AURELIA is a private, multi-provider AI chat application built with Next.js. It provides authenticated chat, per-user model access, persistent conversation history, server-streamed responses, optional live-web grounding, file attachments, and a built-in admin console for user administration.
 
 The interface is intentionally grayscale and dark-first, with a light-theme token set available in the global stylesheet.
 
@@ -32,6 +32,10 @@ The interface is intentionally grayscale and dark-first, with a light-theme toke
 - Three streaming model integrations: Google Gemini, DeepSeek, and NVIDIA NIM.
 - Persistent user-owned conversations and messages stored with Prisma.
 - Optional Tavily web search that grounds the latest question with fresh results.
+- Attach images, PDFs, DOCX files, and plain-text documents directly to a message (up to 15 MB per file).
+- Vision support for image attachments with Swift (Gemini); non-vision models clearly disclose that they cannot inspect images.
+- Long pasted text is converted into a named Markdown attachment instead of overwhelming the composer.
+- Large code blocks can open in a side canvas for easier reading.
 - Admin UI to create users, change roles, grant/revoke model access, and delete accounts.
 - CLI helpers for bootstrapping the first administrator and assigning access.
 - Centralized AURELIA persona and safety prompt applied to every chat request.
@@ -94,6 +98,7 @@ The model registry is the single source of truth for model identifiers, labels, 
 | Swift | `gemini-2.5-flash-lite` | Google Gemini | `gemini-2.5-flash-lite` |
 | Apex | `deepseek-v4-flash` | DeepSeek | `deepseek-chat` |
 | Insight | `nvidia-nemotron` | NVIDIA NIM | `nvidia/nemotron-3-ultra-550b-a55b` |
+| Auto | `auto` | Router | Chooses a registered model for the prompt |
 
 To add a model, add it to the registry and implement/select a provider adapter as needed. Permission rows use the registry `id`, while `apiModel` is sent to the upstream provider.
 
@@ -136,13 +141,15 @@ The schema is defined in [`prisma/schema.prisma`](prisma/schema.prisma). A conve
 
 ### Chat and streaming
 
-1. The UI creates a conversation if necessary and saves the user's message.
-2. It calls `POST /api/chat` with the selected model, conversation ID, messages, and optional search flag.
-3. The server authenticates the caller and verifies model access.
-4. A centralized AURELIA system prompt is prepended to the message history.
-5. When web search is enabled, the latest user message is sent to Tavily and its compact results are added as another system message. If Tavily fails, chat continues without grounding.
-6. The selected adapter calls the provider with streaming enabled and normalizes Server-Sent Events to a plain text `ReadableStream`.
-7. The response stream is split: one branch reaches the browser immediately and the other is buffered and saved as the assistant message.
+1. The UI extracts text from document attachments and prepares image attachments for the API. Long pasted text is attached as Markdown.
+2. The UI creates a conversation if necessary and saves the user's message.
+3. It calls `POST /api/chat` with the selected model, conversation ID, messages, optional images, and optional search flag.
+4. The server authenticates the caller and verifies model access.
+5. A centralized AURELIA system prompt is prepended to the message history.
+6. When web search is enabled, the latest user message is sent to Tavily and its compact results are added as another system message. If Tavily fails, chat continues without grounding.
+7. Gemini receives image data directly. For non-vision models, images are removed and a system note instructs the model to explain the limitation and suggest Swift for image analysis.
+8. The selected adapter calls the provider with streaming enabled and normalizes Server-Sent Events to a plain text `ReadableStream`.
+9. The response stream is split: one branch reaches the browser immediately and the other is buffered and saved as the assistant message.
 
 ### Conversation ownership
 
@@ -159,15 +166,17 @@ src/
 │   └── api/
 │       ├── auth/[...nextauth]/route.ts  # NextAuth handlers
 │       ├── chat/route.ts                # Authorization, grounding, streaming, persistence
+│       ├── extract-file/route.ts        # Attachment validation and text extraction
 │       ├── models/route.ts              # Visible models for current user
 │       ├── conversations/               # Conversation CRUD and user messages
 │       └── admin/users/                 # Admin user management
-├── components/                          # Client UI components
+├── components/                          # Chat UI, attachments, markdown, and canvas components
 ├── lib/
 │   ├── auth.ts / auth.config.ts         # Credentials auth and route authorization
 │   ├── db.ts                            # Reused Prisma client
 │   ├── require-admin.ts                 # Admin-route helper
 │   ├── search.ts                        # Tavily integration
+│   ├── attachments.ts                   # Supported file types and attachment metadata
 │   ├── system-prompt.ts                 # Global AURELIA persona and guardrails
 │   └── providers/                       # Registry and streaming adapters
 ├── middleware.ts                         # Applies authorization to matching routes
@@ -292,6 +301,7 @@ All endpoints below require an authenticated session unless noted otherwise.
 | `GET`, `POST` | `/api/auth/[...nextauth]` | NextAuth authentication handlers. |
 | `GET` | `/api/models` | Returns models visible to the current user. |
 | `POST` | `/api/chat` | Authorizes model use, optionally grounds with search, and streams plain text response chunks. |
+| `POST` | `/api/extract-file` | Validates one attachment and returns extracted text or image base64 data. |
 | `GET`, `POST` | `/api/conversations` | List the caller's conversations or create one. |
 | `GET`, `DELETE` | `/api/conversations/:id` | Read a caller-owned conversation/messages or delete it. |
 | `POST` | `/api/conversations/:id/messages` | Save a caller-owned user message and title a new conversation. |
@@ -305,11 +315,21 @@ All endpoints below require an authenticated session unless noted otherwise.
   "conversationId": "optional-conversation-id",
   "modelId": "gemini-2.5-flash-lite",
   "useWebSearch": false,
-  "messages": [{ "role": "user", "content": "Hello" }]
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is in this image?",
+      "images": [{ "base64": "...", "mimeType": "image/png" }]
+    }
+  ]
 }
 ```
 
 Its successful response is `text/plain; charset=utf-8` streamed as response text, rather than JSON or an AI-SDK-specific protocol.
+
+### Attachments
+
+`POST /api/extract-file` accepts `multipart/form-data` with one `file` field. Supported formats are PNG, JPEG, WebP, GIF, PDF, DOCX, TXT, Markdown, CSV, and JSON. Images are returned as base64 for Gemini; documents are converted to plain text and included in the chat context. Files larger than 15 MB are rejected.
 
 ## Configuration
 
