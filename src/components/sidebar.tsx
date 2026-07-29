@@ -39,7 +39,7 @@ export function Sidebar({
   }
 
   useEffect(() => {
-    void Promise.resolve().then(refresh);
+    refresh();
   }, []);
 
   async function handleNewChat() {
@@ -66,8 +66,6 @@ export function Sidebar({
         open ? "w-72" : "w-0 border-r-0"
       }`}
     >
-      {/* Inner content is fixed width so it doesn't get squished/wrapped
-          during the collapse animation — the parent width is what animates. */}
       <div className="flex h-full w-72 flex-col">
         <div className="flex items-center justify-between gap-2.5 border-b border-border px-5 py-4">
           <div className="flex items-center gap-2.5 overflow-hidden">
@@ -145,10 +143,7 @@ export function Sidebar({
             <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-border-subtle bg-surface-raised text-[11px] font-medium text-muted">
               {(userName ?? "?").slice(0, 1).toUpperCase()}
             </div>
-            <span
-              className="truncate text-xs text-muted"
-              title={userName ?? undefined}
-            >
+            <span className="truncate text-xs text-muted" title={userName ?? undefined}>
               {userName ?? "Signed in"}
             </span>
           </div>
