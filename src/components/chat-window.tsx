@@ -298,8 +298,9 @@ export function ChatWindow({
 
       try {
         while (true) {
+          if (controller.signal.aborted) break;
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done || controller.signal.aborted) break;
           resetStallTimer();
           acc += decoder.decode(value, { stream: true });
           setMessages((prev) =>
@@ -307,23 +308,25 @@ export function ChatWindow({
           );
         }
       } catch (readErr) {
-        reader.cancel().catch(() => {});
-        throw readErr;
+        if (!controller.signal.aborted) {
+          reader.cancel().catch(() => {});
+          throw readErr;
+        }
       }
 
-      if (acc.length === 0) {
+      if (acc.length === 0 && !controller.signal.aborted) {
         throw new Error("The model didn't return a response. Please try again.");
       }
     } catch (err) {
-      console.error("Chat request failed:", err);
-      const isAbort = err instanceof DOMException && err.name === "AbortError";
-      setError(
-        isAbort
-          ? "The response stalled and was stopped. Please try again."
-          : err instanceof Error
-          ? err.message
-          : "Something went wrong"
-      );
+      const isAbort =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && err.name === "AbortError") ||
+        controller.signal.aborted;
+
+      if (!isAbort) {
+        console.error("Chat request failed:", err);
+        setError(err instanceof Error ? err.message : "Something went wrong");
+      }
       setMessages((prev) => prev.filter((m) => !(m.id === assistantId && m.content.length === 0)));
     } finally {
       clearTimeout(hardTimeout);

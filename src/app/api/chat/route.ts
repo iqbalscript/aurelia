@@ -201,18 +201,28 @@ async function saveAssistantReply(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let full = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    full += decoder.decode(value, { stream: true });
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      full += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    // Client may have disconnected mid-stream, causing the tee'd
+    // ReadableStream to abort. This is expected — persist whatever
+    // content was buffered so far rather than losing the response.
   }
 
-  await db.message.create({
-    data: {
-      conversationId,
-      role: "assistant",
-      content: full,
-      modelUsed,
-    },
-  });
+  if (full.length > 0) {
+    await db.message.create({
+      data: {
+        conversationId,
+        role: "assistant",
+        content: full,
+        modelUsed,
+      },
+    });
+  }
 }
+
