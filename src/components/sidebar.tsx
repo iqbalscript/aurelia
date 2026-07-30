@@ -39,7 +39,13 @@ export function Sidebar({
   }
 
   useEffect(() => {
-    refresh();
+    fetch("/api/conversations")
+      .then((res) => res.json())
+      .then((data) => {
+        setConversations(data.conversations ?? []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
   async function handleNewChat() {
@@ -149,6 +155,12 @@ export function Sidebar({
           </div>
 
           <div className="space-y-0.5">
+            <Link
+              href="/memory"
+              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-muted transition-colors hover:bg-surface-raised hover:text-foreground"
+            >
+              Memory
+            </Link>
             {isAdmin && (
               <Link
                 href="/admin"

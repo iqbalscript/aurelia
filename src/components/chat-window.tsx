@@ -48,12 +48,10 @@ export function ChatWindow({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeControllerRef = useRef<AbortController | null>(null);
+  const pastedFileIdRef = useRef(0);
 
   useEffect(() => {
-    if (!conversationId) {
-      setMessages([]);
-      return;
-    }
+    if (!conversationId) return;
     fetch(`/api/conversations/${conversationId}`)
       .then((r) => r.json())
       .then((data) => {
@@ -84,10 +82,7 @@ export function ChatWindow({
   }, [messages]);
 
   useEffect(() => {
-    if (!streaming) {
-      setStage(0);
-      return;
-    }
+    if (!streaming) return;
     const id = setInterval(() => {
       setStage((s) => Math.min(s + 1, THINKING_STAGES.length - 1));
     }, 900);
@@ -109,7 +104,7 @@ export function ChatWindow({
 
     const firstLine = text.trim().split("\n")[0]?.slice(0, 40) ?? "pasted text";
     const file: PastedFile = {
-      id: `paste-${Date.now()}`,
+      id: `paste-${++pastedFileIdRef.current}`,
       filename: `${sanitizeFilename(firstLine) || "pasted-text"}.md`,
       content: text,
       charCount: text.length,
@@ -224,6 +219,7 @@ export function ChatWindow({
     setPastedFiles([]);
     setAttachments([]);
     requestAnimationFrame(autoResize);
+    setStage(0);
     setStreaming(true);
 
     try {

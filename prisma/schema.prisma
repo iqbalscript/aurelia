@@ -22,6 +22,7 @@ model User {
   createdAt     DateTime       @default(now())
   conversations Conversation[]
   modelAccess   ModelAccess[]
+  memories      Memory[]
 }
 
 // Which AI models a specific user is allowed to use.
@@ -55,4 +56,17 @@ model Message {
   attachments    String?      // JSON array of {filename, mimeType, dataUrl?} — see src/lib/attachments.ts
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model Memory {
+  id           String   @id @default(cuid())
+  userId       String
+  content      String   // the extracted fact/preference, e.g. "User's main project is called AURELIA"
+  embedding    String   // JSON-stringified float array from the embedding model
+  sourceConvId String?  // which conversation this was extracted from, if any
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

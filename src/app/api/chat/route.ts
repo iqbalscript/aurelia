@@ -9,6 +9,7 @@ import { webSearch } from "@/lib/search";
 import type { ChatMessage } from "@/lib/providers/types";
 import { AURELIA_SYSTEM_PROMPT } from "@/lib/system-prompt";
 import { pickAutoModel } from "@/lib/auto-router";
+import { retrieveRelevantMemories, extractMemoriesFromConversation } from "@/lib/memory-extraction";
 
 export const runtime = "nodejs";
 
@@ -85,11 +86,28 @@ export async function POST(req: Request) {
 // --- Inject AURELIA's persona + guardrails as the first system message ---
   // This runs on every request regardless of provider, so identity and
   // safety behavior stay consistent across Gemini/OpenRouter/NVIDIA.
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+
+  // --- Retrieve relevant long-term memories for this user ---
+  let memoryContext = "";
+  if (lastUserMsg?.content) {
+    try {
+      const relevant = await retrieveRelevantMemories(session.user.id, lastUserMsg.content);
+      if (relevant.length > 0) {
+        memoryContext = `\n\nWhat you remember about this user from past conversations:\n${relevant
+          .map((m) => `- ${m}`)
+          .join("\n")}`;
+      }
+    } catch (err) {
+      console.error("Memory retrieval error:", err);
+      // Fail open — proceed without memory context rather than blocking chat.
+    }
+  }
+
   let finalMessages: ChatMessage[] = [
-    { role: "system", content: AURELIA_SYSTEM_PROMPT },
+    { role: "system", content: AURELIA_SYSTEM_PROMPT + memoryContext },
     ...messages,
   ];
-  const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
 
 if (useWebSearch && lastUserMsg) {
     try {
@@ -99,7 +117,7 @@ if (useWebSearch && lastUserMsg) {
         content: `Here are live web search results relevant to the user's latest question. Use them to give an accurate, up-to-date answer, and mention sources naturally where relevant:\n\n${searchResults}`,
       };
       finalMessages = [
-        { role: "system", content: AURELIA_SYSTEM_PROMPT },
+        { role: "system", content: AURELIA_SYSTEM_PROMPT + memoryContext },
         groundingMsg,
         ...messages,
       ];
@@ -158,6 +176,15 @@ if (useWebSearch && lastUserMsg) {
     saveAssistantReply(saveStream, conversationId, model.id).catch((err) =>
       console.error(`[chat:${requestId}] Failed to persist assistant reply:`, err)
     );
+
+    // Extract long-term memories every few turns, in the background.
+    // Doesn't block the response — runs after this request returns.
+    const turnCount = messages.filter((m) => m.role === "user").length;
+    if (turnCount > 0 && turnCount % 3 === 0) {
+      extractMemoriesFromConversation(finalMessages, session.user.id, conversationId).catch(
+        (err) => console.error(`[chat:${requestId}] Memory extraction failed:`, err)
+      );
+    }
   }
 
   console.log(`[chat:${requestId}] streaming response from ${model.provider}`);
