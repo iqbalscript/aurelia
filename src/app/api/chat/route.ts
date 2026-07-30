@@ -94,7 +94,7 @@ export async function POST(req: Request) {
     try {
       const relevant = await retrieveRelevantMemories(session.user.id, lastUserMsg.content);
       if (relevant.length > 0) {
-        memoryContext = `\n\nWhat you remember about this user from past conversations:\n${relevant
+        memoryContext = `\n\n## Automatic Context Memory (Persistent across all chat sessions):\n${relevant
           .map((m) => `- ${m}`)
           .join("\n")}`;
       }
@@ -177,14 +177,11 @@ if (useWebSearch && lastUserMsg) {
       console.error(`[chat:${requestId}] Failed to persist assistant reply:`, err)
     );
 
-    // Extract long-term memories every few turns, in the background.
-    // Doesn't block the response — runs after this request returns.
-    const turnCount = messages.filter((m) => m.role === "user").length;
-    if (turnCount > 0 && turnCount % 3 === 0) {
-      extractMemoriesFromConversation(finalMessages, session.user.id, conversationId).catch(
-        (err) => console.error(`[chat:${requestId}] Memory extraction failed:`, err)
-      );
-    }
+    // Extract long-term memories automatically on every turn in the background.
+    // Doesn't block the stream — runs asynchronously after response dispatch.
+    extractMemoriesFromConversation(finalMessages, session.user.id, conversationId).catch(
+      (err) => console.error(`[chat:${requestId}] Memory extraction failed:`, err)
+    );
   }
 
   console.log(`[chat:${requestId}] streaming response from ${model.provider}`);

@@ -1,21 +1,22 @@
-import { getEmbedding } from "./embeddings";
+import { getEmbedding, cosineSimilarity } from "./embeddings";
 import { db, type MemoryRecord } from "./db";
 import type { ChatMessage } from "./providers/types";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const EXTRACTION_MODEL = "gemini-2.5-flash-lite";
 
-const EXTRACTION_PROMPT = `You extract durable, reusable facts about the user from a conversation — the kind of thing worth remembering for future conversations (preferences, ongoing projects, personal details, recurring context). 
+const EXTRACTION_PROMPT = `You are an automatic long-term memory extraction engine for AURELIA AI.
+Your job is to extract durable, reusable facts and context about the user from a conversation (preferences, identity, projects, tech stack, goals, workflows, personal details, recurring topics).
 
-Rules:
-- Only extract facts that would still be useful weeks from now.
-- Skip small talk, one-off questions, and anything purely about the current task.
-- Each fact must be a short, self-contained sentence (max ~20 words).
-- Return ONLY a JSON array of strings, nothing else. No markdown, no preamble.
-- If there's nothing worth remembering, return an empty array: []
+Extraction Guidelines:
+- Extract clear, self-contained factual statements about the user or their work (max ~25 words per fact).
+- Focus on facts that remain useful across future chat sessions (e.g. "User works on AURELIA AI project", "User prefers TypeScript with Next.js", "User uses 4 hex color palette #222831, #393E46, #948979, #DFD0B8").
+- Skip transient one-off greetings or trivial single-turn questions unless they reveal durable preferences or background context.
+- Return ONLY a valid JSON array of strings. Do NOT include markdown codeblocks or preamble.
+- If no durable facts are present, return: []
 
 Example output:
-["User's name is Iqbal Dovandra, goes by 8Balls", "User leads a game dev team called MNTA", "User prefers short, direct answers without fluff"]`;
+["User's name is Iqbal Dovandra (8Balls)", "User leads game and software development projects", "User built AURELIA AI engine", "User prefers clean modular TypeScript code"]`;
 
 export async function extractMemoriesFromConversation(
   messages: ChatMessage[],
@@ -28,12 +29,13 @@ export async function extractMemoriesFromConversation(
     return;
   }
 
-  // Only look at the actual conversation, skip system messages
+  // Look at recent conversation context (user & assistant exchanges)
   const transcript = messages
     .filter((m) => m.role !== "system")
-    .map((m) => `${m.role}: ${m.content}`)
+    .slice(-10) // Focus on recent turns
+    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
     .join("\n\n")
-    .slice(0, 8000); // keep the extraction prompt cheap
+    .slice(0, 8000);
 
   if (!transcript.trim()) return;
 
@@ -47,7 +49,7 @@ export async function extractMemoriesFromConversation(
           contents: [
             {
               role: "user",
-              parts: [{ text: `${EXTRACTION_PROMPT}\n\nConversation:\n${transcript}` }],
+              parts: [{ text: `${EXTRACTION_PROMPT}\n\nConversation Transcript:\n${transcript}` }],
             },
           ],
           generationConfig: { responseMimeType: "application/json" },
@@ -56,17 +58,18 @@ export async function extractMemoriesFromConversation(
     );
 
     if (!res.ok) {
-      console.error("Memory extraction failed:", await res.text().catch(() => ""));
+      console.error("Memory extraction API error:", await res.text().catch(() => ""));
       return;
     }
 
     const data = await res.json();
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "[]";
-    const facts: string[] = JSON.parse(raw);
+    const cleanedRaw = raw.replace(/```json\n?|\n?```/g, "").trim();
+    const facts: string[] = JSON.parse(cleanedRaw);
 
     if (!Array.isArray(facts) || facts.length === 0) return;
 
-    // Fetch existing memories once to do a cheap duplicate check.
+    // Fetch existing user memories for duplicate prevention
     const existing = await db.memory.findMany({
       where: { userId },
       select: { content: true },
@@ -75,20 +78,22 @@ export async function extractMemoriesFromConversation(
 
     for (const fact of facts) {
       if (typeof fact !== "string" || !fact.trim()) continue;
-      if (existingLower.has(fact.trim().toLowerCase())) continue; // skip exact dupes
+      const normalizedFact = fact.trim();
+      if (existingLower.has(normalizedFact.toLowerCase())) continue; // Skip exact duplicate
 
       try {
-        const embedding = await getEmbedding(fact);
+        const embedding = await getEmbedding(normalizedFact);
         await db.memory.create({
           data: {
             userId,
-            content: fact.trim(),
+            content: normalizedFact,
             embedding: JSON.stringify(embedding),
             sourceConvId: conversationId,
           },
         });
+        existingLower.add(normalizedFact.toLowerCase());
       } catch (err) {
-        console.error(`Failed to embed/save memory "${fact}":`, err);
+        console.error(`Failed to store memory "${normalizedFact}":`, err);
       }
     }
   } catch (err) {
@@ -97,35 +102,55 @@ export async function extractMemoriesFromConversation(
 }
 
 /**
- * Retrieves the most relevant memories for the current user message via
- * cosine similarity over stored embeddings. Returns plain text ready to
- * inject into the system prompt.
+ * Retrieves memories for context injection.
+ * Ingests all core memories if total count is <= topK,
+ * or combines top semantic matches + recency if total count is > topK.
  */
 export async function retrieveRelevantMemories(
   userId: string,
   query: string,
-  topK = 8
+  topK = 20
 ): Promise<string[]> {
-  const memories = await db.memory.findMany({ where: { userId } });
+  const memories = await db.memory.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
+
   if (memories.length === 0) return [];
 
+  // If memory count is within topK limit, return all memories to ensure 100% full context retention!
+  if (memories.length <= topK) {
+    return memories.map((m: MemoryRecord) => m.content);
+  }
+
   try {
-    const { cosineSimilarity } = await import("./embeddings");
     const queryEmbedding = await getEmbedding(query);
 
-    const scored: Array<{ content: string; score: number }> = memories.map((m: MemoryRecord) => ({
-      content: m.content,
-      score: cosineSimilarity(queryEmbedding, JSON.parse(m.embedding)),
-    }));
+    const scored = memories.map((m: MemoryRecord) => {
+      let score = 0;
+      try {
+        score = cosineSimilarity(queryEmbedding, JSON.parse(m.embedding));
+      } catch {
+        score = 0;
+      }
+      return { content: m.content, score, createdAt: m.createdAt };
+    });
 
-    scored.sort((a: { score: number }, b: { score: number }) => b.score - a.score);
-    return scored.slice(0, topK).map((s: { content: string }) => s.content);
+    // Rank by semantic relevance
+    scored.sort((a, b) => b.score - a.score);
+
+    const semanticMatches = scored.slice(0, Math.floor(topK * 0.7)).map((s) => s.content);
+    const selectedSet = new Set(semanticMatches);
+
+    // Fill remaining slots with recent memories
+    for (const m of memories) {
+      if (selectedSet.size >= topK) break;
+      selectedSet.add(m.content);
+    }
+
+    return Array.from(selectedSet);
   } catch (err) {
-    console.error("Memory retrieval failed, falling back to recency:", err);
-    // Fail open: if embedding call fails, just return most recent memories
-    // instead of breaking the chat entirely.
-    return memories
-      .slice(-topK)
-      .map((m: MemoryRecord) => m.content);
+    console.error("Semantic memory search fallback to recency:", err);
+    return memories.slice(0, topK).map((m: MemoryRecord) => m.content);
   }
 }
