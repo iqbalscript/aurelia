@@ -3,7 +3,7 @@ import { db, type MemoryRecord } from "./db";
 import type { ChatMessage } from "./providers/types";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const EXTRACTION_MODEL = "gemini-2.5-flash-lite";
+const EXTRACTION_MODEL = "gemini-3.1-flash-lite";
 
 const EXTRACTION_PROMPT = `You are an automatic long-term memory extraction engine for AURELIA AI.
 Your job is to extract durable, reusable facts and context about the user from a conversation (preferences, identity, projects, tech stack, goals, workflows, personal details, recurring topics).

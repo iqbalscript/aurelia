@@ -3,7 +3,7 @@
  *
  * Usage:
  *   npx tsx prisma/grant-access.ts <email> all        -> grant every model
- *   npx tsx prisma/grant-access.ts <email> gemini-2.5-flash-lite openrouter-free
+ *   npx tsx prisma/grant-access.ts <email> gemini-3.1-flash-lite openrouter-free
  *   npx tsx prisma/grant-access.ts <email> admin       -> set role to ADMIN (bypasses allowlist)
  */
 import { PrismaClient } from "@prisma/client";

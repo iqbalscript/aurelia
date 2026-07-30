@@ -6,7 +6,7 @@
  *
  * Examples:
  *   npx tsx prisma/create-user.ts "Budi" budi@example.com secret123
- *   npx tsx prisma/create-user.ts "Budi" budi@example.com secret123 BASIC gemini-2.5-flash-lite
+ *   npx tsx prisma/create-user.ts "Budi" budi@example.com secret123 BASIC gemini-3.1-flash-lite
  *   npx tsx prisma/create-user.ts "Admin" admin@example.com secret123 ADMIN
  */
 import { PrismaClient } from "@prisma/client";

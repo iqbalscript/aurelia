@@ -23,11 +23,11 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     description: "AURELIA picks the best model for your question automatically.",
   },
   {
-    id: "gemini-2.5-flash-lite",
+    id: "gemini-3.1-flash-lite",
     label: "Swift",
     provider: "gemini",
-    apiModel: "gemini-2.5-flash-lite",
-    description: "Gemini 2.5 Flash-Lite — fast everyday answers.",
+    apiModel: "gemini-3.1-flash-lite",
+    description: "Gemini 3.1 Flash-Lite — fast everyday answers.",
   },
   {
     id: "deepseek-v4-flash",

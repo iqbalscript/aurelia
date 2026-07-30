@@ -95,7 +95,7 @@ The model registry is the single source of truth for model identifiers, labels, 
 
 | UI label | Permission ID | Provider | Upstream model |
 | --- | --- | --- | --- |
-| Swift | `gemini-2.5-flash-lite` | Google Gemini | `gemini-2.5-flash-lite` |
+| Swift | `gemini-3.1-flash-lite` | Google Gemini | `gemini-3.1-flash-lite` |
 | Apex | `deepseek-v4-flash` | DeepSeek | `deepseek-chat` |
 | Insight | `nvidia-nemotron` | NVIDIA NIM | `nvidia/nemotron-3-ultra-550b-a55b` |
 | Auto | `auto` | Router | Chooses a registered model for the prompt |
@@ -275,7 +275,7 @@ Use these when bootstrapping or scripting administration:
 npx tsx prisma/create-user.ts "Budi" budi@example.com secret123
 
 # Create a basic user with Swift access
-npx tsx prisma/create-user.ts "Budi" budi@example.com secret123 BASIC gemini-2.5-flash-lite
+npx tsx prisma/create-user.ts "Budi" budi@example.com secret123 BASIC gemini-3.1-flash-lite
 
 # Create an administrator
 npx tsx prisma/create-user.ts "Admin" admin@example.com secret123 ADMIN
@@ -313,7 +313,7 @@ All endpoints below require an authenticated session unless noted otherwise.
 ```json
 {
   "conversationId": "optional-conversation-id",
-  "modelId": "gemini-2.5-flash-lite",
+  "modelId": "gemini-3.1-flash-lite",
   "useWebSearch": false,
   "messages": [
     {

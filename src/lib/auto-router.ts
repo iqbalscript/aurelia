@@ -51,7 +51,7 @@ export function pickAutoModel(messages: ChatMessage[]): string {
 
   // Swift (Gemini Flash-Lite) — quick, short, casual messages
   if (isShortGreeting) {
-    return "gemini-2.5-flash-lite";
+    return "gemini-3.1-flash-lite";
   }
 
   // Apex (DeepSeek) — solid default for everything in between
