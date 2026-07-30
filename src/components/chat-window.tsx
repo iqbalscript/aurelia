@@ -187,16 +187,31 @@ export function ChatWindow({
     const docBlock = docAttachments
       .map((a) => `**Attached: ${a.filename}**\n\n\`\`\`\n${a.extractedText}\n\`\`\``)
       .join("\n\n");
+
+    // Full content (with file contents inlined) — this is what actually
+    // gets sent to the model so it can read the attached files.
     const combinedContent = [input.trim(), pastedBlock, docBlock]
       .filter(Boolean)
       .join("\n\n");
+
+    // Display content — what the user sees in their own chat bubble.
+    // Just the typed text + a short "attached: filename" line per file,
+    // never the raw dumped file contents.
+    const attachmentLabels = [
+      ...pastedFiles.map((f) => `📎 ${f.filename}`),
+      ...docAttachments.map((a) => `📎 ${a.filename}`),
+    ];
+    const displayContent = [input.trim(), attachmentLabels.join("\n")]
+      .filter(Boolean)
+      .join("\n\n");
+
     const imageAttachments = attachments.filter((a) => a.mimeType.startsWith("image/"));
 
     const convId = await ensureConversation();
     const userMessage: Message = {
       id: `local-${Date.now()}`,
       role: "user",
-      content: combinedContent,
+      content: displayContent,
     };
     const nextMessages = [...messages, userMessage];
     const imagesForApi = imageAttachments.map((a) => ({
@@ -215,7 +230,7 @@ export function ChatWindow({
       await fetch(`/api/conversations/${convId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: userMessage.content }),
+        body: JSON.stringify({ content: combinedContent }),
       });
     } catch (err) {
       console.error("Failed to persist user message:", err);
@@ -245,13 +260,14 @@ export function ChatWindow({
           conversationId: convId,
           modelId,
           useWebSearch,
-          messages: nextMessages.map((m, idx) => ({
-            role: m.role,
-            content: m.content,
-            ...(idx === nextMessages.length - 1 && imagesForApi.length > 0
-              ? { images: imagesForApi }
-              : {}),
-          })),
+          messages: nextMessages.map((m, idx) => {
+            const isNewMessage = idx === nextMessages.length - 1;
+            return {
+              role: m.role,
+              content: isNewMessage ? combinedContent : m.content,
+              ...(isNewMessage && imagesForApi.length > 0 ? { images: imagesForApi } : {}),
+            };
+          }),
         }),
       });
 
