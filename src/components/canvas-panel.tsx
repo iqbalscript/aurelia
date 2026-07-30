@@ -51,7 +51,7 @@ export function CanvasPanel({
           </button>
         </div>
       </div>
-      <pre className="flex-1 overflow-auto bg-[#0d0d0d] px-4 py-3">
+      <pre className="flex-1 overflow-auto bg-surface-raised px-4 py-3">
         <code className="font-mono text-sm leading-relaxed text-foreground">{item.code}</code>
       </pre>
     </div>

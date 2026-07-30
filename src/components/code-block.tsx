@@ -22,7 +22,7 @@ export function CodeBlock({
   }
 
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-border bg-[#0d0d0d]">
+    <div className="my-3 overflow-hidden rounded-xl border border-border bg-surface-raised">
       <div className="flex items-center justify-between border-b border-border-subtle px-4 py-2">
         <span className="font-mono text-xs text-muted-2">{language || "text"}</span>
         <button

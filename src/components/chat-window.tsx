@@ -19,6 +19,30 @@ interface Message {
 const THINKING_STAGES = ["Reading", "Reasoning", "Writing"];
 const PASTE_TO_FILE_THRESHOLD = 600;
 
+const QUICK_STARTERS = [
+  {
+    title: "Code & Architecture",
+    desc: "Analyze code structures, debug logic, or design systems.",
+    prompt: "Analyze the architecture of a modular TypeScript application and suggest best practices.",
+  },
+  {
+    title: "Deep Reasoning",
+    desc: "Break down complex problems with step-by-step logic.",
+    prompt: "Let's perform a step-by-step evaluation of the core trade-offs in serverless vs containerized deployments.",
+  },
+  {
+    title: "Web Grounded Research",
+    desc: "Synthesize latest findings with live web context.",
+    prompt: "Find and summarize recent developments in AI model optimization and context window extensions.",
+    enableSearch: true,
+  },
+  {
+    title: "Document Synthesis",
+    desc: "Extract key insights, summaries, and action items.",
+    prompt: "Summarize the key takeaways and actionable conclusions from the attached document.",
+  },
+];
+
 export function ChatWindow({
   conversationId,
   onConversationCreated,
@@ -164,8 +188,9 @@ export function ChatWindow({
     return data.conversation.id;
   }
 
-  async function handleSend() {
-    const hasText = input.trim().length > 0;
+  async function handleSend(customText?: string) {
+    const textToSend = customText ?? input;
+    const hasText = textToSend.trim().length > 0;
     const hasPastedFiles = pastedFiles.length > 0;
     const hasAttachments = attachments.length > 0;
     if ((!hasText && !hasPastedFiles && !hasAttachments) || streaming) return;
@@ -183,20 +208,15 @@ export function ChatWindow({
       .map((a) => `**Attached: ${a.filename}**\n\n\`\`\`\n${a.extractedText}\n\`\`\``)
       .join("\n\n");
 
-    // Full content (with file contents inlined) — this is what actually
-    // gets sent to the model so it can read the attached files.
-    const combinedContent = [input.trim(), pastedBlock, docBlock]
+    const combinedContent = [textToSend.trim(), pastedBlock, docBlock]
       .filter(Boolean)
       .join("\n\n");
 
-    // Display content — what the user sees in their own chat bubble.
-    // Just the typed text + a short "attached: filename" line per file,
-    // never the raw dumped file contents.
     const attachmentLabels = [
       ...pastedFiles.map((f) => `📎 ${f.filename}`),
       ...docAttachments.map((a) => `📎 ${a.filename}`),
     ];
-    const displayContent = [input.trim(), attachmentLabels.join("\n")]
+    const displayContent = [textToSend.trim(), attachmentLabels.join("\n")]
       .filter(Boolean)
       .join("\n\n");
 
@@ -316,47 +336,88 @@ export function ChatWindow({
   }
 
   return (
-    <div className="flex h-full flex-1 overflow-hidden bg-background">
+    <div className="relative flex h-full flex-1 overflow-hidden bg-background">
       <div className="flex h-full flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-border px-4 py-3.5">
-          <div className="flex items-center gap-2">
+        {/* Floating Top Control Deck */}
+        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
             {!sidebarOpen && (
               <button
                 onClick={onOpenSidebar}
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-raised hover:text-foreground"
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-border bg-surface-raised text-muted shadow-sm transition-all hover:border-muted hover:text-foreground"
                 aria-label="Open sidebar"
                 title="Open sidebar"
               >
                 <SidebarIcon />
               </button>
             )}
-            <ModelSelector value={modelId} onChange={setModelId} />
+            <div className="rounded-xl border border-border bg-surface-raised/90 backdrop-blur-md px-3 py-1 shadow-sm">
+              <ModelSelector value={modelId} onChange={setModelId} />
+            </div>
           </div>
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-raised">
-            <input
-              type="checkbox"
-              checked={useWebSearch}
-              onChange={(e) => setUseWebSearch(e.target.checked)}
-              className="accent-current"
-            />
-            Search the web
-          </label>
-        </header>
 
-        <div className="flex-1 overflow-y-auto">
+          <div className="flex items-center gap-3">
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface-raised/90 backdrop-blur-md px-3.5 py-1.5 text-xs text-muted shadow-sm transition-all hover:border-muted hover:text-foreground">
+              <input
+                type="checkbox"
+                checked={useWebSearch}
+                onChange={(e) => setUseWebSearch(e.target.checked)}
+                className="h-3.5 w-3.5 accent-[#DFD0B8]"
+              />
+              <span className="font-medium">Web Grounding</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Message Stream or Hero Centerpiece */}
+        <div className="flex-1 overflow-y-auto px-4 pb-28">
           {messages.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-              <Logo size={52} />
-              <h1 className="font-display mt-5 text-4xl italic text-foreground">AURELIA</h1>
-              <p className="mt-3 max-w-md text-base leading-relaxed text-muted">
-                Adaptive Unified Reasoning Engine for Learning, Intelligence, and
-                Assistance. Ask a question, or turn on web search for anything
-                time-sensitive.
+            <div className="flex min-h-[calc(100vh-180px)] flex-col items-center justify-center py-10">
+              <div className="mb-6 flex items-center justify-center rounded-2xl border border-border bg-surface-raised p-4 shadow-md">
+                <Logo size={56} />
+              </div>
+              <h1 className="font-display text-4xl tracking-wide text-foreground">
+                AURELIA
+              </h1>
+              <p className="mt-2 text-xs uppercase tracking-widest text-muted">
+                Adaptive Unified Reasoning Engine
               </p>
+              <p className="mt-4 max-w-lg text-center text-sm leading-relaxed text-muted-2">
+                Select a quick reasoning mode or type your prompt below to initiate an intelligence session.
+              </p>
+
+              {/* Quick Starter Grid */}
+              <div className="mt-10 grid w-full max-w-2xl grid-cols-1 gap-3.5 sm:grid-cols-2 px-2">
+                {QUICK_STARTERS.map((starter) => (
+                  <button
+                    key={starter.title}
+                    onClick={() => {
+                      if (starter.enableSearch) setUseWebSearch(true);
+                      setInput(starter.prompt);
+                      textareaRef.current?.focus();
+                    }}
+                    className="group flex flex-col justify-between rounded-xl border border-border bg-surface-raised p-4 text-left shadow-sm transition-all hover:border-[#948979] hover:bg-surface-hover"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-foreground group-hover:text-accent">
+                          {starter.title}
+                        </span>
+                        <span className="text-xs text-muted opacity-0 transition-opacity group-hover:opacity-100">
+                          →
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-xs text-muted leading-snug">
+                        {starter.desc}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
-            <div className="mx-auto max-w-4xl px-6 py-10">
-              <div className="space-y-8">
+            <div className="mx-auto max-w-3xl py-8">
+              <div className="space-y-6">
                 {messages.map((m, i) => {
                   const isLastAssistant = m.role === "assistant" && i === messages.length - 1;
                   const isEmptyStreaming =
@@ -364,41 +425,41 @@ export function ChatWindow({
                   const isUser = m.role === "user";
 
                   return (
-                    <div key={m.id} className={`flex gap-3.5 ${isUser ? "flex-row-reverse" : ""}`}>
+                    <div key={m.id} className={`flex gap-4 ${isUser ? "flex-row-reverse" : ""}`}>
                       {isUser ? (
-                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-border-subtle bg-surface-raised text-sm font-medium text-muted">
-                          U
+                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-[#DFD0B8]/40 bg-surface-raised text-[#DFD0B8] shadow-md">
+                          <UserIcon />
                         </div>
                       ) : (
-                        <div className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center">
+                        <div className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-[#948979]/40 bg-surface-raised shadow-md">
                           {isLastAssistant && streaming && (
-                            <span className="breathe-ring absolute inset-0 rounded-full border border-foreground/40" />
+                            <span className="breathe-ring absolute -inset-1 rounded-xl border border-[#DFD0B8]/60 opacity-75" />
                           )}
                           <Logo size={36} />
                         </div>
                       )}
 
                       <div
-                        className={`max-w-[80%] rounded-2xl px-5 py-3.5 ${
+                        className={`group relative max-w-[85%] rounded-2xl px-5 py-4 shadow-sm ${
                           isUser
-                            ? "bg-foreground text-background"
-                            : "border border-border bg-surface text-foreground"
+                            ? "bg-accent text-accent-foreground font-medium"
+                            : "border border-border bg-surface-raised text-foreground"
                         }`}
                       >
                         {isEmptyStreaming ? (
-                          <span className="text-base text-muted-2">
+                          <span className="text-sm text-muted">
                             {THINKING_STAGES[stage]}
                             <span className="caret">…</span>
                           </span>
                         ) : isUser ? (
-                          <p className="whitespace-pre-wrap text-lg leading-relaxed">
+                          <p className="whitespace-pre-wrap text-base leading-relaxed">
                             {m.content}
                           </p>
                         ) : (
                           <>
                             <MessageContent content={m.content} onOpenCanvas={setCanvasItem} />
                             {isLastAssistant && streaming && m.content.length > 0 && (
-                              <span className="caret text-muted-2">▍</span>
+                              <span className="caret text-muted">▍</span>
                             )}
                           </>
                         )}
@@ -410,7 +471,7 @@ export function ChatWindow({
               </div>
 
               {error && (
-                <div className="mt-4 rounded-lg border border-border-subtle bg-surface-raised px-4 py-2.5 text-sm text-muted">
+                <div className="mt-4 rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-muted">
                   {error}
                 </div>
               )}
@@ -418,10 +479,11 @@ export function ChatWindow({
           )}
         </div>
 
-        <div className="border-t border-border p-4">
-          <div className="mx-auto max-w-4xl">
+        {/* Elevated Floating Input Island */}
+        <div className="absolute bottom-4 left-0 right-0 z-20 px-4">
+          <div className="mx-auto max-w-3xl">
             {(pastedFiles.length > 0 || attachments.length > 0) && (
-              <div className="mb-2 flex flex-wrap gap-2">
+              <div className="mb-2 flex flex-wrap gap-2 rounded-xl border border-border bg-surface-raised/95 backdrop-blur-md p-2 shadow-lg">
                 {pastedFiles.map((f) => (
                   <PastedFileChip
                     key={f.id}
@@ -440,7 +502,7 @@ export function ChatWindow({
               </div>
             )}
 
-            <div className="flex items-end gap-2 rounded-2xl border border-border bg-surface px-2 py-2 focus-within:ring-2 focus-within:ring-ring">
+            <div className="relative flex items-end gap-2.5 rounded-2xl border border-border bg-surface-raised/95 backdrop-blur-lg p-2.5 shadow-xl transition-all focus-within:border-[#948979] focus-within:ring-2 focus-within:ring-ring">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -452,7 +514,7 @@ export function ChatWindow({
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-raised hover:text-foreground disabled:opacity-40"
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-border/60 bg-surface/50 text-muted transition-all hover:border-border hover:bg-surface hover:text-foreground disabled:opacity-40"
                 aria-label="Attach file"
                 title="Attach file"
               >
@@ -474,25 +536,26 @@ export function ChatWindow({
                 }}
                 onPaste={handlePaste}
                 rows={1}
-                placeholder="Message AURELIA…"
-                className="max-h-48 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-foreground outline-none placeholder:text-muted-2"
+                placeholder="Ask AURELIA anything…"
+                className="max-h-48 flex-1 resize-none bg-transparent px-2 py-2 text-base text-foreground outline-none placeholder:text-muted-2"
               />
+
               <button
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={
                   streaming ||
                   (!input.trim() && pastedFiles.length === 0 && attachments.length === 0)
                 }
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-30"
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground shadow-sm transition-all hover:opacity-90 disabled:opacity-30"
                 aria-label="Send message"
               >
                 <ArrowUp />
               </button>
             </div>
+            <p className="mt-2 text-center text-[11px] text-muted-2">
+              AURELIA Reasoning Engine • Double check critical output.
+            </p>
           </div>
-          <p className="mx-auto mt-2 max-w-4xl text-center text-xs text-muted-2">
-            AURELIA can make mistakes. Verify important information.
-          </p>
         </div>
 
         {previewFile && (
@@ -511,7 +574,7 @@ function ArrowUp() {
       <path
         d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -547,6 +610,27 @@ function Spinner() {
     <svg width="16" height="16" viewBox="0 0 16 16" className="animate-spin">
       <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.25" fill="none" />
       <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
+function UserIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+      <path
+        d="M10 10a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3.75 17.5a6.25 6.25 0 0 1 12.5 0"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
