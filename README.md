@@ -2,7 +2,7 @@
 
 **A**daptive **U**nified **R**easoning **E**ngine for **L**earning, **I**ntelligence, and **A**ssistance.
 
-AURELIA is a private, multi-provider AI chat application built with Next.js. It provides authenticated chat, per-user model access, persistent conversation history, server-streamed responses, optional live-web grounding, file attachments, and a built-in admin console for user administration.
+AURELIA is a private, multi-provider AI chat application built with Next.js 16. It provides authenticated streaming chat, per-user model access, profile-aware replies, persistent long-term memory, optional live-web grounding, file attachments, and a built-in admin console.
 
 The interface is intentionally grayscale and dark-first, with a light-theme token set available in the global stylesheet.
 
@@ -31,6 +31,8 @@ The interface is intentionally grayscale and dark-first, with a light-theme toke
 - Server-enforced allowlist for the AI models each non-admin user may use.
 - Three streaming model integrations: Google Gemini, DeepSeek, and NVIDIA NIM.
 - Persistent user-owned conversations and messages stored with Prisma.
+- Per-user profile settings for a preferred name and how AURELIA should address that user—no shared hard-coded user identity.
+- Long-term per-user memory: AURELIA extracts durable facts from conversations, retrieves relevant memories for each message, and lets users edit or remove them.
 - Optional Tavily web search that grounds the latest question with fresh results.
 - Attach images, PDFs, DOCX files, and plain-text documents directly to a message (up to 15 MB per file).
 - Vision support for image attachments with Swift (Gemini); non-vision models clearly disclose that they cannot inspect images.
@@ -49,6 +51,7 @@ Browser (React client components)
   ├── /api/conversations ────────────────┐            │
   ├── /api/models ───────────────────────┤            │
   ├── /api/chat (streaming text) ────────┤            │
+  ├── /api/profile + /api/memories ──────┤            │
   └── /api/admin/* (administrators) ─────┤            │
                                            ▼            ▼
                               Next.js App Router route handlers
@@ -70,10 +73,10 @@ The application uses the Next.js App Router. Pages and interactive UI live under
 
 | Layer | Responsibility |
 | --- | --- |
-| UI | Chat composer, streamed-message display, model selector, conversation sidebar, sign-in page, and admin console. |
-| Middleware/auth | Redirects unauthenticated requests to sign-in and prevents non-admin access to `/admin` and `/api/admin/*`. |
-| API routes | Verify the session, enforce ownership/roles, persist data, coordinate search, and return JSON or a text stream. |
-| Domain libraries | Prisma singleton, authorization helpers, system prompt, Tavily integration, and provider registry. |
+| UI | Chat composer, streamed-message display, model selector, profile and memory settings, sign-in page, and admin console. |
+| Proxy/auth | `src/proxy.ts` redirects unauthenticated requests to sign-in and protects `/admin` and `/api/admin/*`. |
+| API routes | Verify the session, enforce ownership/roles, persist profile and memory data, coordinate search, and return JSON or a text stream. |
+| Domain libraries | Prisma singleton, authorization helpers, profile-aware system prompt, memory extraction/retrieval, Tavily integration, and provider registry. |
 | Provider adapters | Convert Gemini and OpenAI-compatible SSE responses into a plain UTF-8 text stream for the UI. |
 | Persistence | Prisma models for users, model permissions, conversations, and messages. |
 
@@ -124,16 +127,17 @@ Model visibility in the selector is a convenience, not the security boundary. `P
 
 ```text
 User (1) ──< ModelAccess >── (permission to registry model ID)
-  │
-  └──< Conversation (1) ──< Message
+  ├──< Conversation (1) ──< Message
+  └──< Memory
 ```
 
 | Model | Purpose |
 | --- | --- |
-| `User` | Identity, email, bcrypt password hash, role, and creation timestamp. |
+| `User` | Identity, email, bcrypt password hash, role, preferred name, addressing preferences, and creation timestamp. |
 | `ModelAccess` | User-to-model allowlist; unique by `(userId, modelId)`. |
 | `Conversation` | A user-owned chat title plus created/updated timestamps. Deleting a user cascades to its conversations. |
 | `Message` | Stored user, assistant, or system message content, selected model, search flag, and timestamp. Deleting a conversation cascades to its messages. |
+| `Memory` | A user-owned durable fact, its embedding, optional source conversation, and timestamps. Deleting a user cascades to their memories. |
 
 The schema is defined in [`prisma/schema.prisma`](prisma/schema.prisma). A conversation title is generated from its first persisted user message (first 48 characters).
 
@@ -145,11 +149,12 @@ The schema is defined in [`prisma/schema.prisma`](prisma/schema.prisma). A conve
 2. The UI creates a conversation if necessary and saves the user's message.
 3. It calls `POST /api/chat` with the selected model, conversation ID, messages, optional images, and optional search flag.
 4. The server authenticates the caller and verifies model access.
-5. A centralized AURELIA system prompt is prepended to the message history.
-6. When web search is enabled, the latest user message is sent to Tavily and its compact results are added as another system message. If Tavily fails, chat continues without grounding.
-7. Gemini receives image data directly. For non-vision models, images are removed and a system note instructs the model to explain the limitation and suggest Swift for image analysis.
-8. The selected adapter calls the provider with streaming enabled and normalizes Server-Sent Events to a plain text `ReadableStream`.
-9. The response stream is split: one branch reaches the browser immediately and the other is buffered and saved as the assistant message.
+5. A centralized AURELIA system prompt is assembled with the signed-in user's profile preferences, so every account is addressed independently.
+6. Relevant long-term memories are retrieved by embedding similarity and added as private context. Memory extraction runs in the background after the response starts streaming.
+7. When web search is enabled, the latest user message is sent to Tavily and its compact results are added as another system message. If Tavily fails, chat continues without grounding.
+8. Gemini receives image data directly. For non-vision models, images are removed and a system note instructs the model to explain the limitation and suggest Swift for image analysis.
+9. The selected adapter calls the provider with streaming enabled and normalizes Server-Sent Events to a plain text `ReadableStream`.
+10. The response stream is split: one branch reaches the browser immediately and the other is buffered and saved as the assistant message.
 
 ### Conversation ownership
 
@@ -163,10 +168,14 @@ src/
 │   ├── page.tsx                         # Main chat page
 │   ├── login/page.tsx                   # Credentials sign-in page
 │   ├── admin/page.tsx                   # User/model access management UI
+│   ├── profile/page.tsx                 # Per-user naming and address preferences
+│   ├── memory/page.tsx                  # Per-user long-term memory management
 │   └── api/
 │       ├── auth/[...nextauth]/route.ts  # NextAuth handlers
 │       ├── chat/route.ts                # Authorization, grounding, streaming, persistence
 │       ├── extract-file/route.ts        # Attachment validation and text extraction
+│       ├── profile/route.ts             # Current user's profile read/update
+│       ├── memories/                    # Current user's memory CRUD
 │       ├── models/route.ts              # Visible models for current user
 │       ├── conversations/               # Conversation CRUD and user messages
 │       └── admin/users/                 # Admin user management
@@ -177,9 +186,11 @@ src/
 │   ├── require-admin.ts                 # Admin-route helper
 │   ├── search.ts                        # Tavily integration
 │   ├── attachments.ts                   # Supported file types and attachment metadata
-│   ├── system-prompt.ts                 # Global AURELIA persona and guardrails
+│   ├── system-prompt.ts                 # Persona, guardrails, and profile context
+│   ├── embeddings.ts                    # Gemini embeddings and cosine similarity
+│   ├── memory-extraction.ts             # Memory extraction and retrieval
 │   └── providers/                       # Registry and streaming adapters
-├── middleware.ts                         # Applies authorization to matching routes
+├── proxy.ts                              # Applies request authorization in Next.js 16
 └── types/next-auth.d.ts                 # Session/JWT type extensions
 
 prisma/
@@ -253,6 +264,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000), sign in with the administrator account, and use `/admin` to create users and grant access.
 
+Each user can then use **Profile** in the sidebar to set the name AURELIA should use and optional addressing preferences. Use **Memory** to inspect, edit, add, or delete that user's saved context.
+
 ## Administration
 
 ### Admin console
@@ -302,6 +315,9 @@ All endpoints below require an authenticated session unless noted otherwise.
 | `GET` | `/api/models` | Returns models visible to the current user. |
 | `POST` | `/api/chat` | Authorizes model use, optionally grounds with search, and streams plain text response chunks. |
 | `POST` | `/api/extract-file` | Validates one attachment and returns extracted text or image base64 data. |
+| `GET`, `PATCH` | `/api/profile` | Reads or updates the signed-in user's preferred name and addressing preferences. |
+| `GET`, `POST` | `/api/memories` | Lists the signed-in user's memories or adds a memory. |
+| `PATCH`, `DELETE` | `/api/memories/:id` | Updates or deletes a caller-owned memory. |
 | `GET`, `POST` | `/api/conversations` | List the caller's conversations or create one. |
 | `GET`, `DELETE` | `/api/conversations/:id` | Read a caller-owned conversation/messages or delete it. |
 | `POST` | `/api/conversations/:id/messages` | Save a caller-owned user message and title a new conversation. |
@@ -377,6 +393,7 @@ When introducing a model, update the registry first, then ensure the required en
 - There is no password reset, email verification, MFA, or self-service registration flow.
 - There is no application-level rate limiting, usage metering, token budget, or provider failover.
 - The chat UI saves messages separately from the streamed response; a provider/network interruption can leave a conversation with a user message but no assistant reply.
+- Automatic memory extraction requires `GEMINI_API_KEY`; it fails open, so chat continues if extraction or embeddings are unavailable.
 - Tavily grounding is injected into context, but source URLs are not rendered as dedicated citations in the UI.
 - NVIDIA reasoning-only deltas are intentionally omitted; the UI streams final answer content.
 - Conversation titles are derived once from the first user message and are not editable in the UI.
