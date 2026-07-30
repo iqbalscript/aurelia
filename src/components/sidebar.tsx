@@ -161,6 +161,12 @@ export function Sidebar({
             >
               Memory
             </Link>
+            <Link
+              href="/profile"
+              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-muted transition-colors hover:bg-surface-raised hover:text-foreground"
+            >
+              Profile
+            </Link>
             {isAdmin && (
               <Link
                 href="/admin"

@@ -18,6 +18,8 @@ model User {
   email         String         @unique
   password      String
   name          String?
+  preferredName String?
+  addressInstructions String?
   role          Role           @default(BASIC)
   createdAt     DateTime       @default(now())
   conversations Conversation[]

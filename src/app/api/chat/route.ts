@@ -7,7 +7,7 @@ import { streamDeepSeek } from "@/lib/providers/deepseek";
 import { streamNvidia } from "@/lib/providers/nvidia";
 import { webSearch } from "@/lib/search";
 import type { ChatMessage } from "@/lib/providers/types";
-import { AURELIA_SYSTEM_PROMPT } from "@/lib/system-prompt";
+import { buildAureliaSystemPrompt, type UserProfileContext } from "@/lib/system-prompt";
 import { pickAutoModel } from "@/lib/auto-router";
 import { retrieveRelevantMemories, extractMemoriesFromConversation } from "@/lib/memory-extraction";
 
@@ -83,7 +83,12 @@ export async function POST(req: Request) {
     }
   }
 
-// --- Inject AURELIA's persona + guardrails as the first system message ---
+  const profile = (await db.user.findUnique({
+    where: { id: session.user.id },
+  })) as unknown as UserProfileContext | null;
+  const systemPrompt = buildAureliaSystemPrompt(profile ?? undefined);
+
+  // --- Inject AURELIA's persona + guardrails as the first system message ---
   // This runs on every request regardless of provider, so identity and
   // safety behavior stay consistent across Gemini/OpenRouter/NVIDIA.
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
@@ -105,7 +110,7 @@ export async function POST(req: Request) {
   }
 
   let finalMessages: ChatMessage[] = [
-    { role: "system", content: AURELIA_SYSTEM_PROMPT + memoryContext },
+    { role: "system", content: systemPrompt + memoryContext },
     ...messages,
   ];
 
@@ -117,7 +122,7 @@ if (useWebSearch && lastUserMsg) {
         content: `Here are live web search results relevant to the user's latest question. Use them to give an accurate, up-to-date answer, and mention sources naturally where relevant:\n\n${searchResults}`,
       };
       finalMessages = [
-        { role: "system", content: AURELIA_SYSTEM_PROMPT + memoryContext },
+        { role: "system", content: systemPrompt + memoryContext },
         groundingMsg,
         ...messages,
       ];
@@ -225,4 +230,3 @@ async function saveAssistantReply(
     });
   }
 }
-
